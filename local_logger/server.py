@@ -1,11 +1,3 @@
-# Smart Parking local logger.
-# Pure-stdlib HTTP server + SQLite. Receives access events from the ESP32
-# and exposes a dashboard and JSON/CSV endpoints.
-#
-# Run:
-#     python server.py
-# Then open http://localhost:5000
-
 import csv
 import http.server
 import io
@@ -24,7 +16,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "smart_parking.db")
 
 
-# ---------- DB ----------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -165,7 +156,6 @@ def clear_logs():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("DELETE FROM access_logs")
-    # sqlite_sequence only exists after the first INSERT. Ignore if missing.
     try:
         cur.execute("DELETE FROM sqlite_sequence WHERE name='access_logs'")
     except sqlite3.OperationalError:
@@ -183,9 +173,8 @@ def _to_int(v):
         return None
 
 
-# ---------- HTML ----------
 DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -251,8 +240,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="wrap">
-  <h1>Smart Parking — Local Logs</h1>
-  <div class="meta">Auto refresh every 2 s · Database: smart_parking.db</div>
+  <h1>Smart Parking - Local Logs</h1>
+  <div class="meta">Auto refresh every 2 s - Database: smart_parking.db</div>
 
   <div class="cards" id="cards"></div>
 
@@ -325,7 +314,7 @@ function renderCards(stats) {
   function cell(label, value, extraCls) {
     return '<div class="card ' + (extraCls || "") + '">'
       + '<div class="label">' + label + '</div>'
-      + '<div class="value">' + (value == null || value === "" ? "—" : value) + '</div></div>';
+      + '<div class="value">' + (value == null || value === "" ? "-" : value) + '</div></div>';
   }
   c.innerHTML = ""
     + cell("Total events",     stats.total)
@@ -348,7 +337,7 @@ function renderRecent(rows) {
     html += '<li>'
       + '<span class="t">' + (r.created_at || "") + '</span>'
       + statusBadge(r)
-      + '<span class="u">' + (r.uid || "—") + '</span>'
+      + '<span class="u">' + (r.uid || "-") + '</span>'
       + '<span class="m">' + (r.message || "") + '</span>'
       + '</li>';
   }
@@ -389,7 +378,7 @@ function renderTable(rows) {
 
 function applyAndRender() {
   const filtered = allLogs.filter(function(r){ return matchesFilter(r) && matchesSearch(r); });
-  renderRecent(allLogs);   // recent always shows latest across filters
+  renderRecent(allLogs);
   renderTable(filtered);
 }
 
@@ -403,7 +392,7 @@ async function refresh() {
     const logs  = await logsRes.json();
     if (stats && stats.ok) renderCards(stats);
     if (logs && logs.ok)   { allLogs = logs.logs; applyAndRender(); }
-  } catch (e) { /* network blip — keep last render */ }
+  } catch (e) {}
 }
 async function clearLogs() {
   if (!confirm("Delete all logs?")) return;
@@ -426,11 +415,9 @@ setInterval(refresh, 2000);
 """
 
 
-# ---------- HTTP handler ----------
 class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
-        # Keep console clean; we print our own [LOG SAVED] line on success.
         return
 
     def _send_json(self, code, obj):

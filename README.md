@@ -1,39 +1,41 @@
 # Smart Parking System on ESP32
 
-Навчальний проект розумної автостоянки на базі ESP32 DevKit. Плата керує
-шлагбаумом, перевіряє RFID-картки доступу, відстежує зайнятість трьох
-паркомісць за допомогою ультразвукових датчиків і надсилає події на
-локальний Python-логер, який зберігає їх у SQLite.
+An educational smart parking project based on ESP32 DevKit. The board controls
+a barrier, validates RFID access cards, tracks occupancy of three parking
+spots via ultrasonic sensors, and sends events to a local Python logger that
+stores them in SQLite.
 
-## Компоненти
+## Components
 
 - ESP32 DevKit (Wi-Fi Access Point)
-- OLED дисплей SH1106 128×64 (I2C, бібліотека U8g2)
-- RFID-зчитувач RC522 (SPI)
-- Сервопривід шлагбаума (керування через ручний PWM, без бібліотеки `ESP32Servo`)
-- Активний buzzer
-- 3× ультразвукові датчики HC-SR04
+- OLED display SH1106 128x64 (I2C, U8g2 library)
+- RFID reader RC522 (SPI)
+- Servo motor for the barrier (manual PWM, no `ESP32Servo` library)
+- Active buzzer
+- 3x ultrasonic sensors HC-SR04
 
-## Основні функції
+## Main features
 
-- Wi-Fi Access Point `SmartParking_AP` з web-інтерфейсами:
-  - `http://192.168.4.1/` — головний dashboard (картки P1/P2/P3, статус шлагбаума, останній RFID-скан)
-  - `http://192.168.4.1/debug` — діагностична панель (raw/filtered/lastGood для сенсорів, free heap, last HTTP code)
-  - `http://192.168.4.1/data` — JSON API для frontend
-- Перевірка RFID-картки, керування шлагбаумом, звуковий feedback на buzzer
-- Стабільне визначення зайнятості місць: median-фільтр з 3 вимірювань,
-  гістерезис 15/22 см, debounce-підтвердження двома підряд вимірюваннями,
-  захист від відсутніх echo-відповідей
-- Неблокуюче логування подій: фізична реакція системи (OLED, buzzer, серво)
-  відбувається миттєво, а HTTP-POST до Python-логера ставиться в pending-чергу
-  і відправляється з `loop()` з повторами кожні 4 секунди при недоступному логері
-- Локальний Python-логер на стандартних бібліотеках, SQLite-база, dashboard
-  зі статистикою, фільтрами, пошуком по UID, CSV-експортом і очищенням таблиці
+- Wi-Fi Access Point `SmartParking_AP` with web interfaces:
+  - `http://192.168.4.1/` - main dashboard (P1/P2/P3 cards, barrier status, latest RFID scan)
+  - `http://192.168.4.1/debug` - diagnostic panel (raw/filtered/lastGood for sensors, free heap, last HTTP code)
+  - `http://192.168.4.1/data` - JSON API for the frontend
+- RFID card validation, barrier control, audible buzzer feedback
+- Stable spot occupancy detection: median filter across 3 measurements,
+  15/22 cm hysteresis, debounce confirmation across two consecutive
+  measurements, protection against missing echo responses
+- Non-blocking event logging: the physical reaction (OLED, buzzer, servo)
+  happens instantly, while the HTTP POST to the Python logger is queued
+  as a pending log and dispatched from `loop()` with retries every
+  4 seconds when the logger is offline
+- Local Python logger built on the standard library, SQLite database,
+  dashboard with statistics, filters, UID search, CSV export, and the
+  ability to clear the table
 
-## Схема пінів
+## Pin layout
 
-| Компонент       | Сигнал | GPIO |
-|-----------------|--------|------|
+| Component       | Signal | GPIO |
+|-|-|-|
 | OLED SH1106     | SDA    | 21   |
 | OLED SH1106     | SCL    | 22   |
 | RC522           | SS     | 5    |
@@ -42,7 +44,7 @@
 | RC522           | MOSI   | 23   |
 | RC522           | MISO   | 19   |
 | Buzzer          | OUT    | 25   |
-| Servo (шлагбаум)| PWM    | 13   |
+| Servo (barrier) | PWM    | 13   |
 | HC-SR04 #1      | TRIG   | 14   |
 | HC-SR04 #1      | ECHO   | 34   |
 | HC-SR04 #2      | TRIG   | 16   |
@@ -50,30 +52,30 @@
 | HC-SR04 #3      | TRIG   | 17   |
 | HC-SR04 #3      | ECHO   | 36   |
 
-**Важливо щодо живлення і рівнів:**
+**Important notes on power and voltage levels:**
 
-- RC522 живиться **тільки від 3.3 В**. Підключення 5 В на VCC виведе модуль з ладу.
-- Echo-вихід HC-SR04 видає 5 В, а GPIO ESP32 не толерантні до 5 В.
-  На лініях ECHO обов'язково ставити дільник напруги (наприклад 1 кΩ + 2 кΩ),
-  щоб привести сигнал до 3.3 В.
-- GPIO 34, 35, 36 на ESP32 — input-only, тому використовуються саме для ECHO.
+- RC522 must be powered **only from 3.3 V**. Connecting 5 V to VCC will damage the module.
+- The HC-SR04 echo output is 5 V, and ESP32 GPIOs are not 5 V tolerant.
+  Always add a voltage divider on the ECHO lines (for example 1k + 2k)
+  to bring the signal down to 3.3 V.
+- GPIO 34, 35, 36 on ESP32 are input-only and are used for ECHO.
 
-## Як прошити ESP32 (PlatformIO)
+## Flashing the ESP32 (PlatformIO)
 
-Проект розрахований на PlatformIO Core або PlatformIO IDE у VS Code.
+The project targets PlatformIO Core or PlatformIO IDE in VS Code.
 
 ```sh
-# Збірка
+# Build
 pio run -e esp32dev
 
-# Прошивка (заміни COM-порт на свій)
-pio run -e esp32dev -t upload --upload-port COM3
+# Flash (replace COM3 with your port)
+pio run -e esp32dev -t upload -upload-port COM3
 
 # Serial Monitor
 pio device monitor -p COM3 -b 115200
 ```
 
-Після прошивки в Serial з'явиться:
+After flashing, the serial output will show:
 
 ```
 Smart Parking system started
@@ -84,16 +86,17 @@ RFID OK
 System ready
 ```
 
-## Як запустити локальний логер
+## Running the local logger
 
-Логер написаний на стандартних бібліотеках Python 3, без зовнішніх залежностей.
+The logger is written using only the Python 3 standard library, with no
+external dependencies.
 
 ```sh
 cd local_logger
 python server.py
 ```
 
-Має з'явитися вивід:
+You should see output similar to:
 
 ```
 Smart Parking local logger
@@ -102,42 +105,42 @@ Listen  : http://0.0.0.0:5000
 Dashboard on this PC: http://localhost:5000
 ```
 
-Перед прошивкою в `src/main.cpp` потрібно вказати IP-адресу комп'ютера в
-мережі `SmartParking_AP` у константі `LOG_SERVER_URL`:
+Before flashing, set the IP address of the laptop on the `SmartParking_AP`
+network in the `LOG_SERVER_URL` constant in `src/main.cpp`:
 
 ```cpp
 const char* LOG_SERVER_URL = "http://192.168.4.2:5000/api/log";
 ```
 
-IP можна дізнатися командою `ipconfig` у блоці "Wireless LAN adapter Wi-Fi"
-після підключення ноутбука до `SmartParking_AP`. Зазвичай це `192.168.4.2`.
+You can find the IP with `ipconfig` under "Wireless LAN adapter Wi-Fi"
+after connecting the laptop to `SmartParking_AP`. It is usually `192.168.4.2`.
 
-## Web-інтерфейси
+## Web interfaces
 
-| URL                              | Опис                                            |
-|----------------------------------|-------------------------------------------------|
-| `http://192.168.4.1/`            | головний dashboard паркінгу                     |
-| `http://192.168.4.1/debug`       | технічна панель з raw-значеннями сенсорів       |
-| `http://192.168.4.1/data`        | JSON API для динамічного оновлення dashboard    |
-| `http://localhost:5000/`         | dashboard локального логера (статистика, фільтри)|
-| `http://localhost:5000/api/logs` | список подій у JSON                             |
-| `http://localhost:5000/api/stats`| агрегована статистика                           |
-| `http://localhost:5000/download.csv` | експорт усієї таблиці у CSV                 |
-| `http://localhost:5000/api/log`  | приймає POST з ESP32                            |
-| `http://localhost:5000/api/clear`| POST для очищення таблиці (видно на dashboard)  |
-| `http://localhost:5000/api/health`| перевірка стану логера                         |
+| URL                                  | Description                                          |
+|-|-|
+| `http://192.168.4.1/`                | main parking dashboard                               |
+| `http://192.168.4.1/debug`           | technical panel with raw sensor values               |
+| `http://192.168.4.1/data`            | JSON API for dynamic dashboard updates               |
+| `http://localhost:5000/`             | local logger dashboard (statistics, filters)         |
+| `http://localhost:5000/api/logs`     | JSON list of events                                  |
+| `http://localhost:5000/api/stats`    | aggregated statistics                                |
+| `http://localhost:5000/download.csv` | export the full table to CSV                         |
+| `http://localhost:5000/api/log`      | accepts POST from ESP32                              |
+| `http://localhost:5000/api/clear`    | POST to clear the table (also exposed on dashboard)  |
+| `http://localhost:5000/api/health`   | logger health check                                  |
 
 ## SQLite logging
 
-Локальний логер створює SQLite-базу `local_logger/smart_parking.db` з
-таблицею `access_logs`:
+The local logger creates a SQLite database at `local_logger/smart_parking.db`
+with the `access_logs` table:
 
 ```sql
 CREATE TABLE access_logs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at      TEXT NOT NULL,
     uid             TEXT NOT NULL,
-    access_status   TEXT NOT NULL,    -- GRANTED / DENIED
+    access_status   TEXT NOT NULL,
     message         TEXT,
     free_spots      INTEGER,
     p1_status       TEXT, p1_distance INTEGER,
@@ -147,23 +150,23 @@ CREATE TABLE access_logs (
 );
 ```
 
-Кожна RFID-подія на ESP32 формує snapshot стану паркінгу і відправляється
-POST'ом на `/api/log`. Якщо логер недоступний, ESP32 тримає запис у
-pending-черзі і повторює спробу кожні 4 секунди — RFID-, buzzer- і
-servo-логіка від цього не сповільнюється.
+Each RFID event on the ESP32 builds a snapshot of the parking state and is
+POSTed to `/api/log`. If the logger is offline, the ESP32 keeps the record
+in a pending queue and retries every 4 seconds - the RFID, buzzer, and servo
+logic is not slowed down by this.
 
-Файл `smart_parking.db` не комітиться в репозиторій (див. `.gitignore`).
+The `smart_parking.db` file is not committed to the repository (see `.gitignore`).
 
-## Структура проекту
+## Project structure
 
 ```
 SmartParking/
-├── platformio.ini          конфігурація PlatformIO
-├── src/
-│   └── main.cpp            прошивка ESP32
-├── local_logger/
-│   ├── server.py           Python-логер з dashboard
-│   └── smart_parking.db    локальна база (не у Git)
-├── .gitignore
-└── README.md
+- platformio.ini          PlatformIO configuration
+- src/
+  - main.cpp              ESP32 firmware
+- local_logger/
+  - server.py             Python logger with dashboard
+  - smart_parking.db      local database (not tracked in Git)
+- .gitignore
+- README.md
 ```

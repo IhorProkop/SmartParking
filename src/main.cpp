@@ -7,31 +7,18 @@
 #include <MFRC522.h>
 #include <U8g2lib.h>
 
-// ===================== PINS =====================
-// Hardware notes:
-//   - RC522 is a 3.3 V module. Do NOT connect VCC to 5 V.
-//   - HC-SR04 Echo outputs 5 V; ESP32 GPIOs are not 5 V tolerant.
-//     Use a resistor divider (e.g. 1 kΩ + 2 kΩ) between Echo and ECHOx.
-//   - GPIO 34 / 35 / 36 are input-only on ESP32 and used for Echo pins.
-
-// OLED SH1106 (software I2C through U8g2)
 #define OLED_SDA 21
 #define OLED_SCL 22
 
-// RFID RC522
 #define RFID_SS  5
 #define RFID_RST 27
-// SCK=18, MOSI=23, MISO=19 (default VSPI)
 
-// Buzzer
 #define BUZZER_PIN 25
 
-// Servo (manual PWM, NO ESP32Servo library)
 #define SERVO_PIN 13
 #define SERVO_CLOSED_ANGLE 0
 #define SERVO_OPEN_ANGLE   90
 
-// HC-SR04 sensors
 #define TRIG1 14
 #define ECHO1 34
 #define TRIG2 16
@@ -39,44 +26,26 @@
 #define TRIG3 17
 #define ECHO3 36
 
-// ===================== CONFIG =====================
-// !!! PASTE YOUR REAL CARD UID HERE (uppercase hex, space-separated) !!!
-// Example: "DE AD BE EF"
 String ALLOWED_UID = "7D 4B 42 05";
 
-// Distance thresholds (cm) — hysteresis so a noisy reading near the edge
-// doesn't flip the slot back and forth.
-#define OCCUPIED_ENTER_CM 15  // FREE -> BUSY when distance < this
-#define OCCUPIED_EXIT_CM  22  // BUSY -> FREE when distance > this
+#define OCCUPIED_ENTER_CM 15
+#define OCCUPIED_EXIT_CM  22
 
-// Valid range for a single distance reading (cm). Outside → treat as NO ECHO.
-// Max 250 covers the macro-board envelope; the 12000 µs pulseIn timeout
-// caps physical readings at ~207 cm so the upper bound is mostly a safety net.
 const long DIST_MIN_VALID_CM = 2;
 const long DIST_MAX_VALID_CM = 250;
 
-// Status changes only after this many consecutive confirming readings.
 const int SENSOR_CONFIRM_COUNT = 2;
 
-// Pause between firing different HC-SR04 trigs, to avoid cross-talk.
 const unsigned long SENSOR_INTER_GAP_MS = 30;
 
-// WiFi AP credentials
 const char* AP_SSID     = "SmartParking_AP";
 const char* AP_PASSWORD = "12345678";
 
-// ===================== LOGGING =====================
-// Local Python logger on Windows 11. Computer must be connected to SmartParking_AP.
-// Find its IP with `ipconfig` (Wireless LAN adapter Wi-Fi -> IPv4 Address).
-// Typical first client is 192.168.4.2. Do NOT use "localhost" here.
 const bool  LOGGING_ENABLED = true;
 const char* LOG_SERVER_URL  = "http://192.168.4.2:5000/api/log";
 const uint16_t LOG_HTTP_TIMEOUT_MS = 300;
-// If a log POST fails, retry the pending log after this many ms.
-// Keeps RFID/buzzer/servo responsive while the logger is offline.
 const unsigned long LOG_RETRY_INTERVAL_MS = 4000;
 
-// ===================== GLOBALS =====================
 U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(
   U8G2_R0,
   22,
@@ -89,13 +58,12 @@ WebServer server(80);
 
 bool rfidReady = false;
 
-// Per-sensor state for stable FREE/BUSY detection.
 struct ParkingSensor {
   int  trigPin;
   int  echoPin;
-  long distance;          // latest filtered reading or -1 if NO ECHO
-  long lastRawDistance;   // last raw HC-SR04 read (debug visibility only)
-  long lastGoodDistance;  // last valid reading, shown when current is NO ECHO
+  long distance;
+  long lastRawDistance;
+  long lastGoodDistance;
   bool occupied;
   int  busyConfirmCount;
   int  freeConfirmCount;
@@ -107,7 +75,6 @@ ParkingSensor sensors[3] = {
   { TRIG3, ECHO3, -1, -1, 999, false, 0, 0 },
 };
 
-// Mirror of sensors[] state for OLED, web and log code paths.
 long   distance1 = 999;
 long   distance2 = 999;
 long   distance3 = 999;
@@ -117,23 +84,18 @@ bool   busy3 = false;
 int    freeSlots = 3;
 
 String lastUID           = "NONE";
-String lastAccessStatus  = "NONE"; // GRANTED / DENIED / NONE
+String lastAccessStatus  = "NONE";
 String lastAccessMessage = "";
 
 unsigned long lastSensorUpdate  = 0;
 unsigned long lastDisplayUpdate = 0;
 
-// RFID cooldown so a card resting on the reader doesn't re-fire
-// the whole granted/denied sequence on every loop iteration.
 unsigned long lastRFIDReadTime = 0;
 const unsigned long RFID_COOLDOWN_MS = 700;
 
-// Sensors / display refresh rates (keep main loop responsive for RFID)
 const unsigned long SENSOR_INTERVAL_MS  = 1000;
 const unsigned long DISPLAY_INTERVAL_MS = 1000;
 
-// Pending log — RFID events fill these, loop() flushes them via HTTP.
-// Single-slot queue: keeps the OLED/buzzer/servo path off the HTTP timeout.
 bool          pendingLogExists      = false;
 String        pendingLogUID         = "";
 String        pendingLogStatus      = "";
@@ -147,13 +109,10 @@ long          pendingLogDist2       = 0;
 long          pendingLogDist3       = 0;
 unsigned long pendingLogNextAttempt = 0;
 
-// Last HTTP code from a log POST attempt — 0 = never tried, surfaced on /debug.
 int lastLogHttpCode = 0;
 
-// Barrier status: CLOSED / OPENING / CLOSING — surfaced on / and /data.
 String barrierStatus = "CLOSED";
 
-// ===================== FORWARD DECLARATIONS =====================
 void   setupWiFiAP();
 void   setupWebServer();
 void   handleRoot();
@@ -194,14 +153,12 @@ String buildLogPayload(String uid, String accessStatus, String message,
 void   queueAccessLog(String uid, String accessStatus, String message);
 void   flushPendingLog();
 
-// ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println();
   Serial.println("Smart Parking system started");
 
-  // Pins
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
@@ -212,22 +169,17 @@ void setup() {
   pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
   pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
 
-  // OLED first so we can show progress
   u8g2.begin();
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tf);
   u8g2.drawStr(0, 12, "SmartParking boot");
   u8g2.sendBuffer();
 
-  // Barrier closed at boot
   closeBarrier();
 
-  // 1) Start WiFi AP and web server BEFORE RFID,
-  //    so dashboard works even if RFID hardware fails.
   setupWiFiAP();
   setupWebServer();
 
-  // 2) Try to bring up RFID
   SPI.begin(18, 19, 23, RFID_SS);
   rfid.PCD_Init();
   delay(50);
@@ -238,7 +190,7 @@ void setup() {
 
   if (v == 0x00 || v == 0xFF) {
     rfidReady = false;
-    Serial.println("RFID NOT DETECTED — continuing without RFID");
+    Serial.println("RFID NOT DETECTED - continuing without RFID");
   } else {
     rfidReady = true;
     Serial.println("RFID OK");
@@ -252,39 +204,28 @@ void setup() {
   showStatus();
 }
 
-// ===================== LOOP =====================
 void loop() {
-  // 1) Always serve web clients first (fast, non-blocking)
   server.handleClient();
 
-  // 2) RFID has priority — check on every loop iteration so card
-  //    detection feels instant. Cooldown is enforced inside.
   if (rfidReady) {
     processRFIDFast();
   }
 
   unsigned long now = millis();
 
-  // 3) Sensors — slow, gated by millis(). updateSensors() also syncs
-  //    the legacy busy/freeSlots globals.
   if (now - lastSensorUpdate > SENSOR_INTERVAL_MS) {
     lastSensorUpdate = now;
     updateSensors();
   }
 
-  // 4) Display — gated by millis()
   if (now - lastDisplayUpdate > DISPLAY_INTERVAL_MS) {
     lastDisplayUpdate = now;
     showStatus();
   }
 
-  // 5) Try to deliver any queued RFID log. HTTP fires only if a log is
-  //    pending and the retry window has elapsed — OLED/buzzer/servo are
-  //    long since done by this point.
   flushPendingLog();
 }
 
-// ===================== WIFI / WEB =====================
 void setupWiFiAP() {
   WiFi.mode(WIFI_AP);
   bool ok = WiFi.softAP(AP_SSID, AP_PASSWORD);
@@ -315,8 +256,6 @@ void handleRoot() {
 }
 
 String buildHtml() {
-  // Static skeleton; the JS at the bottom fills it from /data every 2 s,
-  // so the page updates without the meta-refresh flash.
   String s;
   s.reserve(5500);
   s += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
@@ -355,7 +294,7 @@ String buildHtml() {
 
   s += F("<div class='wrap'>");
   s += F("<h1>Smart Parking Dashboard<span class='pill' id='online'>System Online</span></h1>");
-  s += F("<div class='sub'>Live status · Uptime <span id='uptime'>-</span></div>");
+  s += F("<div class='sub'>Live status &middot; Uptime <span id='uptime'>-</span></div>");
 
   s += F("<div class='hero'>");
   s += F("<div class='lbl'>Free spots</div>");
@@ -383,13 +322,13 @@ String buildHtml() {
   s += F("<div class='row'><span class='k'>Pending log</span><span class='v' id='l-pen'>-</span></div>");
   s += F("</div>");
 
-  s += F("<div class='links'><a href='/debug'>Debug Panel</a> · <a href='/data'>Data API (JSON)</a></div>");
+  s += F("<div class='links'><a href='/debug'>Debug Panel</a> &middot; <a href='/data'>Data API (JSON)</a></div>");
   s += F("</div>");
 
   s += F("<script>");
   s += F("function ut(ms){var s=Math.floor(ms/1000),h=Math.floor(s/3600);s-=h*3600;var m=Math.floor(s/60);s-=m*60;return (h>0?h+'h ':'')+m+'m '+s+'s';}");
   s += F("function setBadge(st){var e=document.getElementById('pbadge');var c='b-a',t=st;if(st==='ALMOST_FULL'){c='b-w';t='ALMOST FULL';}else if(st==='FULL'){c='b-f';t='FULL';}else t='AVAILABLE';e.className='badge '+c;e.textContent=t;}");
-  s += F("function renderSlots(arr){var h='';for(var i=0;i<arr.length;i++){var s=arr[i];var cls=s.no_echo?'sN':(s.status==='BUSY'?'sB':'sF');var lab=s.no_echo?'NO ECHO':s.status;var d=(s.distance<0)?'-- cm':(s.distance+' cm');h+='<div class=\"slot '+cls+'\"><div class=\"pid\">'+s.id+'</div><div class=\"stat\">'+lab+'</div><div class=\"dist\">'+d+'</div></div>';}document.getElementById('slots').innerHTML=h;}");
+  s += F("function renderSlots(arr){var h='';for(var i=0;i<arr.length;i++){var s=arr[i];var cls=s.no_echo?'sN':(s.status==='BUSY'?'sB':'sF');var lab=s.no_echo?'NO ECHO':s.status;var d=(s.distance<0)?'- cm':(s.distance+' cm');h+='<div class=\"slot '+cls+'\"><div class=\"pid\">'+s.id+'</div><div class=\"stat\">'+lab+'</div><div class=\"dist\">'+d+'</div></div>';}document.getElementById('slots').innerHTML=h;}");
   s += F("function setOnline(ok){var e=document.getElementById('online');e.textContent=ok?'System Online':'Disconnected';e.className='pill'+(ok?'':' off');}");
   s += F("async function tick(){try{var r=await fetch('/data');var d=await r.json();document.getElementById('free').textContent=d.free_spots;setBadge(d.parking_status);renderSlots(d.slots);document.getElementById('r-uid').textContent=d.rfid.last_uid||'-';document.getElementById('r-stat').textContent=d.rfid.last_access_status||'-';document.getElementById('r-msg').textContent=d.rfid.last_access_message||'-';document.getElementById('r-hw').textContent=d.rfid.ready?'OK':'NOT DETECTED';document.getElementById('b-stat').textContent=d.barrier_status;document.getElementById('b-msg').textContent=d.rfid.last_access_message||'-';document.getElementById('l-url').textContent=d.logger.url;document.getElementById('l-code').textContent=d.logger.last_http_code;document.getElementById('l-pen').textContent=d.logger.pending_log?'YES':'no';document.getElementById('uptime').textContent=ut(d.system_uptime_ms);setOnline(true);}catch(e){setOnline(false);}}");
   s += F("tick();setInterval(tick,2000);");
@@ -452,7 +391,7 @@ void handleDebug() {
   s += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
   s += F("<meta http-equiv='refresh' content='2'>");
   s += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
-  s += F("<title>Smart Parking — Debug</title>");
+  s += F("<title>Smart Parking - Debug</title>");
   s += F("<style>");
   s += F("body{font-family:monospace;background:#0f172a;color:#e2e8f0;margin:0;padding:20px;line-height:1.4}");
   s += F(".wrap{max-width:880px;margin:0 auto}");
@@ -468,10 +407,9 @@ void handleDebug() {
   s += F(".ok{color:#4ade80;font-weight:bold}.bad{color:#f87171;font-weight:bold}");
   s += F("</style></head><body><div class='wrap'>");
 
-  s += F("<div class='bar'><h1>Smart Parking — Debug</h1>");
+  s += F("<div class='bar'><h1>Smart Parking - Debug</h1>");
   s += F("<a class='back' href='/'>&larr; Back to Dashboard</a></div>");
 
-  // System
   s += F("<h2>System</h2><table>");
   s += F("<tr><th>RFID</th><td>");
   s += rfidReady ? F("<span class='ok'>OK</span>") : F("<span class='bad'>ERROR</span>");
@@ -483,14 +421,12 @@ void handleDebug() {
   s += F("<tr><th>Free heap</th><td>"); s += String(ESP.getFreeHeap()); s += F(" bytes</td></tr>");
   s += F("</table>");
 
-  // RFID
   s += F("<h2>RFID</h2><table>");
   s += F("<tr><th>Last UID</th><td>"); s += lastUID; s += F("</td></tr>");
   s += F("<tr><th>Last access</th><td>"); s += lastAccessStatus; s += F("</td></tr>");
   s += F("<tr><th>Last message</th><td>"); s += lastAccessMessage; s += F("</td></tr>");
   s += F("</table>");
 
-  // Logging
   s += F("<h2>Logging</h2><table>");
   s += F("<tr><th>LOG_SERVER_URL</th><td>"); s += LOG_SERVER_URL; s += F("</td></tr>");
   s += F("<tr><th>Last log HTTP code</th><td>"); s += String(lastLogHttpCode); s += F("</td></tr>");
@@ -500,7 +436,6 @@ void handleDebug() {
   s += F("<tr><th>Barrier status</th><td>"); s += barrierStatus; s += F("</td></tr>");
   s += F("</table>");
 
-  // Sensors
   s += F("<h2>Sensors</h2><table>");
   s += F("<tr><th>#</th><th>Raw</th><th>Filtered</th><th>LastGood</th><th>Status</th></tr>");
   for (int i = 0; i < 3; i++) {
@@ -516,7 +451,6 @@ void handleDebug() {
 
   s += F("<p>Free spots: <b>"); s += String(freeSlots); s += F(" / 3</b></p>");
 
-  // Thresholds
   s += F("<h2>Thresholds</h2><table>");
   s += F("<tr><th>OCCUPIED_ENTER_CM</th><td>"); s += String(OCCUPIED_ENTER_CM); s += F("</td></tr>");
   s += F("<tr><th>OCCUPIED_EXIT_CM</th><td>");  s += String(OCCUPIED_EXIT_CM);  s += F("</td></tr>");
@@ -531,8 +465,6 @@ void handleDebug() {
   server.send(200, "text/html; charset=utf-8", s);
 }
 
-// ===================== SENSORS =====================
-// One raw HC-SR04 read. Returns cm or -1 for NO ECHO / out-of-range.
 long readDistanceRawCm(int trigPin, int echoPin) {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
@@ -540,7 +472,6 @@ long readDistanceRawCm(int trigPin, int echoPin) {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  // 12 ms timeout ~ 2 m max — keeps loop snappy for RFID.
   long duration = pulseIn(echoPin, HIGH, 12000UL);
   if (duration == 0) return -1;
   long cm = duration / 58;
@@ -552,9 +483,6 @@ bool isValidDistance(long distance) {
   return distance >= DIST_MIN_VALID_CM && distance <= DIST_MAX_VALID_CM;
 }
 
-// Three raw reads, returns median of the valid ones (or -1 if none valid).
-// Rejects bursts of noise and a single spurious echo. Also reports the last
-// raw read via lastRawOut for debug visibility.
 long readDistanceFilteredCm(int trigPin, int echoPin, long &lastRawOut) {
   long valid[3];
   int  validCount = 0;
@@ -566,7 +494,7 @@ long readDistanceFilteredCm(int trigPin, int echoPin, long &lastRawOut) {
     if (isValidDistance(r)) {
       valid[validCount++] = r;
     }
-    if (i < 2) delay(10); // let the previous echo settle before re-firing
+    if (i < 2) delay(10);
   }
   lastRawOut = lastRaw;
 
@@ -574,15 +502,12 @@ long readDistanceFilteredCm(int trigPin, int echoPin, long &lastRawOut) {
   if (validCount == 1) return valid[0];
   if (validCount == 2) return (valid[0] + valid[1]) / 2;
 
-  // Median of 3 (simple sort).
   if (valid[0] > valid[1]) { long t = valid[0]; valid[0] = valid[1]; valid[1] = t; }
   if (valid[1] > valid[2]) { long t = valid[1]; valid[1] = valid[2]; valid[2] = t; }
   if (valid[0] > valid[1]) { long t = valid[0]; valid[0] = valid[1]; valid[1] = t; }
   return valid[1];
 }
 
-// Update one sensor with hysteresis + N-confirm debounce.
-// On NO ECHO: keep the previous stable status, don't reset counters.
 void updateOneSensor(ParkingSensor &s) {
   long raw = -1;
   long d = readDistanceFilteredCm(s.trigPin, s.echoPin, raw);
@@ -590,7 +515,6 @@ void updateOneSensor(ParkingSensor &s) {
   s.distance = d;
 
   if (!isValidDistance(d)) {
-    // NO ECHO — keep occupied as-is, keep counters untouched.
     Serial.print("Sensor trig=");
     Serial.print(s.trigPin);
     Serial.println(": NO ECHO");
@@ -622,16 +546,12 @@ void updateOneSensor(ParkingSensor &s) {
   }
 }
 
-// Read all three sensors sequentially, with anti-crosstalk gap.
-// Also syncs the legacy globals so OLED/web/log code stays unchanged.
 void updateSensors() {
   for (int i = 0; i < 3; i++) {
     updateOneSensor(sensors[i]);
     if (i < 2) delay(SENSOR_INTER_GAP_MS);
   }
 
-  // Show last good distance on the dashboard when current is NO ECHO,
-  // so the user never sees a phantom 999/-1 jump.
   distance1 = isValidDistance(sensors[0].distance) ? sensors[0].distance : sensors[0].lastGoodDistance;
   distance2 = isValidDistance(sensors[1].distance) ? sensors[1].distance : sensors[1].lastGoodDistance;
   distance3 = isValidDistance(sensors[2].distance) ? sensors[2].distance : sensors[2].lastGoodDistance;
@@ -643,7 +563,6 @@ void updateSensors() {
   freeSlots = (busy1 ? 0 : 1) + (busy2 ? 0 : 1) + (busy3 ? 0 : 1);
 }
 
-// ===================== OLED =====================
 void drawFrame() {
   u8g2.drawFrame(0, 0, 128, 64);
 }
@@ -707,7 +626,6 @@ void showParkingFull(String uid) {
   u8g2.sendBuffer();
 }
 
-// ===================== BUZZER =====================
 void playToneManual(int frequency, int durationMs) {
   if (frequency <= 0) {
     delay(durationMs);
@@ -745,7 +663,6 @@ void soundParkingFull() {
   playToneManual(500, 300);
 }
 
-// ===================== SERVO (manual PWM) =====================
 int angleToPulseUs(int angle) {
   angle = constrain(angle, 0, 180);
   return map(angle, 0, 180, 500, 2400);
@@ -786,7 +703,6 @@ void openBarrier() {
   barrierStatus = "CLOSED";
 }
 
-// ===================== RFID =====================
 String uidToString(MFRC522::Uid uid) {
   String s;
   for (byte i = 0; i < uid.size; i++) {
@@ -799,8 +715,6 @@ String uidToString(MFRC522::Uid uid) {
 }
 
 void processRFIDFast() {
-  // Cooldown: avoid re-scanning the same card a dozen times while
-  // it's still resting on the reader.
   if (millis() - lastRFIDReadTime < RFID_COOLDOWN_MS) return;
 
   if (!rfid.PICC_IsNewCardPresent()) return;
@@ -815,29 +729,21 @@ void processRFIDFast() {
   Serial.print("Card UID: ");
   Serial.println(uid);
 
-  // Release the card immediately so the reader is ready for the next
-  // tap as soon as our action sequence finishes.
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
 
-  // Use last cached sensor values — sensors are refreshed by the loop()
-  // every SENSOR_INTERVAL_MS, no need to block here.
   if (uid == ALLOWED_UID) {
     if (freeSlots > 0) {
       lastAccessStatus  = "GRANTED";
       lastAccessMessage = "Correct card. Barrier opened.";
       Serial.println("ACCESS GRANTED");
 
-      // Physical reaction first, log queued for loop() to flush — keeps
-      // response instant even when the laptop logger is offline.
       showAccessGranted(uid);
       soundAccessGranted();
       openBarrier();
 
       queueAccessLog(uid, "GRANTED", "Correct card. Barrier opened.");
 
-      // openBarrier() blocks for ~3.3 s; refresh the MFRC522 so the
-      // next tap is detected reliably afterwards.
       rfid.PCD_Init();
     } else {
       lastAccessStatus  = "DENIED";
@@ -861,7 +767,6 @@ void processRFIDFast() {
   }
 }
 
-// ===================== LOGGING =====================
 String jsonEscape(String value) {
   String out;
   out.reserve(value.length() + 8);
@@ -911,9 +816,6 @@ String buildLogPayload(String uid, String accessStatus, String message,
   return json;
 }
 
-// queueAccessLog — snapshot the RFID event state into the pending slot.
-// Called from processRFIDFast() AFTER the physical reaction (OLED + buzzer
-// + servo) so the user feels an instant response. No HTTP here.
 void queueAccessLog(String uid, String accessStatus, String message) {
   if (!LOGGING_ENABLED) return;
 
@@ -932,7 +834,7 @@ void queueAccessLog(String uid, String accessStatus, String message) {
   pendingLogDist1       = distance1;
   pendingLogDist2       = distance2;
   pendingLogDist3       = distance3;
-  pendingLogNextAttempt = millis();   // try ASAP on the next loop() pass
+  pendingLogNextAttempt = millis();
   pendingLogExists      = true;
 
   Serial.print("Log queued: ");
@@ -941,14 +843,10 @@ void queueAccessLog(String uid, String accessStatus, String message) {
   Serial.println(accessStatus);
 }
 
-// flushPendingLog — called from loop(). One bounded HTTP attempt at most
-// (LOG_HTTP_TIMEOUT_MS). On failure: keep the pending slot, retry in
-// LOG_RETRY_INTERVAL_MS. On success: clear pending slot.
 void flushPendingLog() {
   if (!pendingLogExists) return;
 
   unsigned long now = millis();
-  // Rollover-safe wait: don't try until the retry window elapses.
   if ((long)(now - pendingLogNextAttempt) < 0) return;
 
   String payload = buildLogPayload(
@@ -965,7 +863,7 @@ void flushPendingLog() {
 
   if (!http.begin(client, LOG_SERVER_URL)) {
     Serial.println("Pending log: http.begin() failed, will retry");
-    lastLogHttpCode       = -999;   // begin() failure sentinel for /debug
+    lastLogHttpCode       = -999;
     pendingLogNextAttempt = millis() + LOG_RETRY_INTERVAL_MS;
     return;
   }
